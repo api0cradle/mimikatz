@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kuhl_m_crypto.h"
 
@@ -14,6 +14,8 @@ const KUHL_M_C kuhl_m_c_crypto[] = {
 	{kuhl_m_crypto_l_stores,		L"stores",			L"List cryptographic stores"},
 	{kuhl_m_crypto_l_certificates,	L"certificates",	L"List (or export) certificates"},
 	{kuhl_m_crypto_l_keys,			L"keys",			L"List (or export) keys containers"},
+	{kuhl_m_crypto_hash,			L"hash",			L"Hash a password with optional username"},
+	{kuhl_m_crypto_system,			L"system",			L"Describe a Windows System Certificate (file, TODO:registry or hive)"},
 
 	{kuhl_m_crypto_p_capi,			L"capi",			L"[experimental] Patch CryptoAPI layer for easy export"},
 	{kuhl_m_crypto_p_cng,			L"cng",				L"[experimental] Patch CNG service for easy export"},
@@ -641,6 +643,177 @@ wchar_t * kuhl_m_crypto_generateFileName(const wchar_t * term0, const wchar_t * 
 			kull_m_file_cleanFilename(buffer);
 	}
 	return buffer;
+}
+
+NTSTATUS kuhl_m_crypto_hash(int argc, wchar_t * argv[])
+{
+	PCWCHAR szCount, szPassword = NULL, szUsername = NULL;
+	UNICODE_STRING uPassword, uUsername, uTmp;
+	ANSI_STRING aTmp;
+	DWORD count = 10240;
+	BYTE hash[LM_NTLM_HASH_LENGTH], dcc[LM_NTLM_HASH_LENGTH], md5[MD5_DIGEST_LENGTH], sha1[SHA_DIGEST_LENGTH], sha2[32];
+	
+	kull_m_string_args_byName(argc, argv, L"password", &szPassword, NULL);
+	kull_m_string_args_byName(argc, argv, L"user", &szUsername, NULL);
+	if(kull_m_string_args_byName(argc, argv, L"count", &szCount, NULL))
+		count = wcstoul(szCount, NULL, 0);
+
+	RtlInitUnicodeString(&uPassword, szPassword);
+	RtlInitUnicodeString(&uUsername, szUsername);
+	if(NT_SUCCESS(RtlDigestNTLM(&uPassword, hash)))
+	{
+		kprintf(L"NTLM: "); kull_m_string_wprintf_hex(hash, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
+		if(szUsername)
+		{
+			if(NT_SUCCESS(kull_m_crypto_get_dcc(dcc, hash, &uUsername, 0)))
+			{
+				kprintf(L"DCC1: "); kull_m_string_wprintf_hex(dcc, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
+				if(NT_SUCCESS(kull_m_crypto_get_dcc(dcc, hash, &uUsername, count)))
+				{
+					kprintf(L"DCC2: "); kull_m_string_wprintf_hex(dcc, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
+				}
+			}
+		}
+	}
+
+	if(NT_SUCCESS(RtlUpcaseUnicodeString(&uTmp, &uPassword, TRUE)))
+	{
+		if(NT_SUCCESS(RtlUnicodeStringToAnsiString(&aTmp, &uTmp, TRUE)))
+		{
+			if(NT_SUCCESS(RtlDigestLM(aTmp.Buffer, hash)))
+			{
+				kprintf(L"LM  : "); kull_m_string_wprintf_hex(hash, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
+			}
+			RtlFreeAnsiString(&aTmp);
+		}
+		RtlFreeUnicodeString(&uTmp);
+	}
+
+	if(kull_m_crypto_hash(CALG_MD5, uPassword.Buffer, uPassword.Length, md5, MD5_DIGEST_LENGTH))
+		kprintf(L"MD5 : "); kull_m_string_wprintf_hex(md5, MD5_DIGEST_LENGTH, 0); kprintf(L"\n");
+	if(kull_m_crypto_hash(CALG_SHA1, uPassword.Buffer, uPassword.Length, sha1, SHA_DIGEST_LENGTH))
+		kprintf(L"SHA1: "); kull_m_string_wprintf_hex(sha1, SHA_DIGEST_LENGTH, 0); kprintf(L"\n");
+	if(kull_m_crypto_hash(CALG_SHA_256, uPassword.Buffer, uPassword.Length, sha2, 32))
+		kprintf(L"SHA2: "); kull_m_string_wprintf_hex(sha2, 32, 0); kprintf(L"\n");
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS kuhl_m_crypto_system(int argc, wchar_t * argv[])
+{
+	PBYTE fileData;
+	DWORD fileLenght;
+	PKUHL_M_CRYPTO_CERT_PROP prop;
+	PKUHL_M_CRYPTO_CRYPT_KEY_PROV_INFO provInfo;
+	PCWCHAR name, infile;
+
+	if(kull_m_string_args_byName(argc, argv, L"file", &infile, NULL)) // TODO: registry & hive
+	{
+		if(kull_m_file_readData(infile, &fileData, &fileLenght))
+		{
+			for(prop = (PKUHL_M_CRYPTO_CERT_PROP) fileData; (PBYTE) prop < (fileData + fileLenght); prop = (PKUHL_M_CRYPTO_CERT_PROP) ((PBYTE) prop + FIELD_OFFSET(KUHL_M_CRYPTO_CERT_PROP, data) + prop->size))
+			{
+				name = kull_m_crypto_cert_prop_id_to_name(prop->dwPropId);
+				kprintf(L"[%04x/%x] %s\n", prop->dwPropId, prop->flags, name ? name : L"?");
+				if(prop->size)
+				{
+					kprintf(L"  ");
+					switch(prop->dwPropId)
+					{
+					case CERT_KEY_PROV_INFO_PROP_ID:
+						kprintf(L"Provider info:\n");
+						provInfo = (PKUHL_M_CRYPTO_CRYPT_KEY_PROV_INFO) prop->data;
+						if(provInfo->offsetContainerName)
+							kprintf(L"\tKey Container  : %s\n", prop->data + provInfo->offsetContainerName);
+						if(provInfo->offsetProvName)
+							kprintf(L"\tProvider       : %s\n", prop->data + provInfo->offsetProvName);
+						name = kull_m_crypto_provider_type_to_name(provInfo->dwProvType);
+						kprintf(L"\tProvider type  : %s (%u)\n", name ? name : L"?", provInfo->dwProvType);
+						kprintf(L"\tType           : %s (0x%08x)\n", kull_m_crypto_keytype_to_str(provInfo->dwKeySpec), provInfo->dwKeySpec);
+						kprintf(L"\tFlags          : %08x\n", provInfo->dwFlags);
+						kprintf(L"\tParam (todo)   : %08x / %08x\n", provInfo->cProvParam, provInfo->offsetRgProvParam);
+						break;
+					case CERT_FRIENDLY_NAME_PROP_ID:
+					case CERT_OCSP_CACHE_PREFIX_PROP_ID:
+						kprintf(L"%.*s", prop->size / sizeof(wchar_t), prop->data);
+						break;
+
+					case CERT_cert_file_element:
+					case CERT_crl_file_element:
+					case CERT_ctl_file_element:
+					case CERT_keyid_file_element:
+						kuhl_m_crypto_file_rawData(prop, infile, kull_m_string_args_byName(argc, argv, L"export", NULL, NULL));
+						break;
+					case CERT_SHA1_HASH_PROP_ID:
+					case CERT_MD5_HASH_PROP_ID :
+					case CERT_SIGNATURE_HASH_PROP_ID:
+					case CERT_ISSUER_PUBLIC_KEY_MD5_HASH_PROP_ID:
+					case CERT_SUBJECT_PUBLIC_KEY_MD5_HASH_PROP_ID:
+					case CERT_ISSUER_SERIAL_NUMBER_MD5_HASH_PROP_ID:
+					case CERT_SUBJECT_NAME_MD5_HASH_PROP_ID:
+					case CERT_KEY_IDENTIFIER_PROP_ID:
+						//
+					default:
+						kull_m_string_wprintf_hex(prop->data, prop->size, 0);
+						break;
+					}
+					kprintf(L"\n");
+				}
+
+			}
+			LocalFree(fileData);
+		}
+		else PRINT_ERROR_AUTO(L"kull_m_file_readData");
+	}
+	else PRINT_ERROR(L"Input Microsoft Crypto Certificate file needed (/in:file)\n");
+	return STATUS_SUCCESS;
+}
+
+void kuhl_m_crypto_file_rawData(PKUHL_M_CRYPTO_CERT_PROP prop, PCWCHAR inFile, BOOL isExport)
+{
+	PCWCHAR type, file = PathFindFileName(inFile);
+	wchar_t * buffer;
+	size_t charCount;
+
+	switch(prop->dwPropId)
+	{
+	case CERT_cert_file_element:
+		type = L"der";
+		break;
+	case CERT_crl_file_element:
+		type = L"crl";
+		break;
+	case CERT_ctl_file_element:
+		type = L"ctl";
+		break;
+	case CERT_keyid_file_element:
+		type = L"keyid";
+		break;
+	default:
+		type = NULL;
+	}
+
+	if(type)
+	{
+		kprintf(L"Data: ");
+		kull_m_string_wprintf_hex(prop->data, prop->size, 0);
+		kprintf(L"\n");
+		if(isExport)
+		{
+			kprintf(L"  ");
+			charCount = wcslen(file) + 1 + wcslen(type) + 1;
+			if(buffer = (wchar_t *) LocalAlloc(LPTR, (charCount) * sizeof(wchar_t)))
+			{
+				if(swprintf_s(buffer, charCount, L"%s.%s", file, type) > 0)
+				{
+					if(kull_m_file_writeData(buffer, prop->data, prop->size))
+						kprintf(L"Saved to file: %s\n", buffer);
+					else PRINT_ERROR_AUTO(L"kull_m_file_writeData");
+				}
+				LocalFree(buffer);
+			}
+		}
+	}
 }
 
 BYTE PATC_WIN5_CPExportKey_EXPORT[]	= {0xeb};

@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kuhl_m_sekurlsa_utils.h"
 
@@ -118,7 +118,7 @@ PVOID kuhl_m_sekurlsa_utils_pFromLinkedListByLuid(PKULL_M_MEMORY_ADDRESS pSecuri
 			{
 				if(kull_m_memory_copy(&aBuffer, &data, LUIDoffset + sizeof(LUID)))
 				{
-					if(RtlEqualLuid(luidToFind, (PLUID) ((PBYTE)(aBuffer.address) + LUIDoffset)))
+					if(SecEqualLuid(luidToFind, (PLUID) ((PBYTE)(aBuffer.address) + LUIDoffset)))
 					{
 						resultat = data.address;
 						break;
@@ -163,7 +163,7 @@ PVOID kuhl_m_sekurlsa_utils_pFromAVLByLuidRec(PKULL_M_MEMORY_ADDRESS pTable, ULO
 			{
 				if(kull_m_memory_copy(&data, pTable, LUIDoffset + sizeof(LUID)))
 				{
-					if(RtlEqualLuid(luidToFind, (PLUID) ((PBYTE) (data.address) + LUIDoffset)))
+					if(SecEqualLuid(luidToFind, (PLUID) ((PBYTE) (data.address) + LUIDoffset)))
 						resultat = maTable.OrderedPointer;
 				}
 				LocalFree(data.address);

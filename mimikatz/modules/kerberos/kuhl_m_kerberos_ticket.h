@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #pragma once
 #include "../kuhl_m.h"
@@ -90,11 +90,11 @@ typedef struct _KIWI_KERBEROS_TICKET {
 	FILETIME	EndTime;
 	FILETIME	RenewUntil;
 
-	ULONG		KeyType;
+	LONG		KeyType;
 	KIWI_KERBEROS_BUFFER	Key;
 
 	ULONG		TicketFlags;
-	ULONG		TicketEncType;
+	LONG		TicketEncType;
 	ULONG		TicketKvno;
 	KIWI_KERBEROS_BUFFER	Ticket;
 } KIWI_KERBEROS_TICKET, *PKIWI_KERBEROS_TICKET;

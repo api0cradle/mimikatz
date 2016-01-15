@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #pragma once
 
@@ -25,6 +25,7 @@
 #endif
 #include "modules/dpapi/kuhl_m_dpapi.h"
 #include "modules/kuhl_m_kernel.h"
+#include "modules/kuhl_m_busylight.h"
 
 #include <io.h>
 #include <fcntl.h>

@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #pragma once
 #include "../kuhl_m_sekurlsa.h"
@@ -71,75 +71,64 @@ typedef struct _KERB_INFOS {
 	LONG	offsetHashGeneric;
 	SIZE_T	structKeyPasswordHashSize;
 
-	LONG	offsetSizeOfCurrentStruct;
+	LONG	offsetSizeOfCsp;
 	LONG	offsetNames;
 	SIZE_T	structCspInfosSize;
 } KERB_INFOS, *PKERB_INFOS;
 
-typedef struct _KIWI_KERBEROS_CSP_NAMES {
-	DWORD offsetToCard;
-	DWORD offsetToReader;
-	DWORD offsetToSerial;
-	DWORD offsetToProvider;
-	//...
-} KIWI_KERBEROS_CSP_NAMES, *PKIWI_KERBEROS_CSP_NAMES;
+typedef struct _KERB_SMARTCARD_CSP_INFO_5 {
+	DWORD dwCspInfoLen;
+	PVOID ContextInformation;
+	ULONG nCardNameOffset;
+	ULONG nReaderNameOffset;
+	ULONG nContainerNameOffset;
+	ULONG nCSPNameOffset;
+	WCHAR bBuffer[ANYSIZE_ARRAY];
+} KERB_SMARTCARD_CSP_INFO_5, *PKERB_SMARTCARD_CSP_INFO_5;
 
-typedef struct _KIWI_KERBEROS_CSP_INFOS_51 {
+typedef struct _KERB_SMARTCARD_CSP_INFO {
+	DWORD dwCspInfoLen;
+	DWORD MessageType;
+	union {
+		PVOID   ContextInformation;
+		ULONG64 SpaceHolderForWow64;
+	};
+	DWORD flags;
+	DWORD KeySpec;
+	ULONG nCardNameOffset;
+	ULONG nReaderNameOffset;
+	ULONG nContainerNameOffset;
+	ULONG nCSPNameOffset;
+	WCHAR bBuffer[ANYSIZE_ARRAY];
+} KERB_SMARTCARD_CSP_INFO, *PKERB_SMARTCARD_CSP_INFO;
+
+typedef struct _KIWI_KERBEROS_CSP_INFOS_5 {
 	LSA_UNICODE_STRING PinCode;
 	PVOID unk0;
 	PVOID unk1;
 	PVOID CertificateInfos;
-	PVOID unk2;
-	PVOID unk3;
-	DWORD sizeOfNextStruct;
-	DWORD sizeOfCurrentStruct;
-	PVOID unkCSP; // ?,
-	KIWI_KERBEROS_CSP_NAMES names;
-} KIWI_KERBEROS_CSP_INFOS_51, *PKIWI_KERBEROS_CSP_INFOS_51;
+
+	PVOID unkData;	// 0 = CspData
+	DWORD Flags;	// 1 = CspData (not 0x21)
+
+
+	DWORD CspDataLength;
+	KERB_SMARTCARD_CSP_INFO_5 CspData;
+} KIWI_KERBEROS_CSP_INFOS_5, *PKIWI_KERBEROS_CSP_INFOS_5;
 
 typedef struct _KIWI_KERBEROS_CSP_INFOS_60 {
 	LSA_UNICODE_STRING PinCode;
 	PVOID unk0;
 	PVOID unk1;
 	PVOID CertificateInfos;
-	PVOID unk2;
-#ifdef _M_IX86
-	DWORD		unkAlign0;
-#endif
-	DWORD unk3_size;
-	DWORD sizeOfNextStruct;
-	DWORD unk4;
-	DWORD sizeOfCurrentStruct;
-	DWORD unk5;
-	PVOID unkCSP; // ?,
-#ifdef _M_IX86
-	DWORD		unkAlign1;
-#endif
-	DWORD unk6;
-	DWORD unk7;
-	KIWI_KERBEROS_CSP_NAMES names;
-} KIWI_KERBEROS_CSP_INFOS_60, *PKIWI_KERBEROS_CSP_INFOS_60;
 
-typedef struct _KIWI_KERBEROS_CSP_INFOS_61 {
-	LSA_UNICODE_STRING PinCode;
-	PVOID unk0;
-	PVOID unk1;
-	PVOID CertificateInfos;
-	PVOID unk2;
-	DWORD unk3;
-	DWORD unk4_size;
-	DWORD sizeOfNextStruct;
-	DWORD unk5;
-	DWORD sizeOfCurrentStruct;
-	DWORD unk6;
-	PVOID unkCSP;
-#ifdef _M_IX86
-	DWORD		unkAlign0;
-#endif
-	DWORD unk7;
-	DWORD unk8;
-	KIWI_KERBEROS_CSP_NAMES names;
-} KIWI_KERBEROS_CSP_INFOS_61, *PKIWI_KERBEROS_CSP_INFOS_61;
+	PVOID unkData;	// 0 = CspData
+	DWORD Flags;	// 0 = CspData
+	DWORD unkFlags;	// 0x141
+
+	DWORD CspDataLength;
+	KERB_SMARTCARD_CSP_INFO CspData;
+} KIWI_KERBEROS_CSP_INFOS_60, *PKIWI_KERBEROS_CSP_INFOS_60;
 
 typedef struct _KIWI_KERBEROS_CSP_INFOS_62 {
 	LSA_UNICODE_STRING PinCode;
@@ -147,22 +136,12 @@ typedef struct _KIWI_KERBEROS_CSP_INFOS_62 {
 	PVOID unk1;
 	PVOID CertificateInfos;
 	PVOID unk2;
-	PVOID unk3;
-	DWORD unk4;
-	DWORD unk5_size;
-	DWORD sizeOfNextStruct;
-#ifdef _M_X64
-	DWORD		unkAlign0;
-#endif
-	DWORD sizeOfCurrentStruct;
-	DWORD unk7;
-	PVOID unkCSP;
-#ifdef _M_IX86
-	DWORD		unkAlign1;
-#endif
-	DWORD unk8;
-	DWORD unk9;
-	KIWI_KERBEROS_CSP_NAMES names;
+	PVOID unkData;	// 0 = CspData
+	DWORD Flags;	// 0 = CspData
+	DWORD unkFlags;	// 0x141 (not 0x61)
+
+	DWORD CspDataLength;
+	KERB_SMARTCARD_CSP_INFO CspData;
 } KIWI_KERBEROS_CSP_INFOS_62, *PKIWI_KERBEROS_CSP_INFOS_62;
 
 typedef struct _KIWI_KERBEROS_CSP_INFOS_10 {
@@ -171,22 +150,12 @@ typedef struct _KIWI_KERBEROS_CSP_INFOS_10 {
 	PVOID unk1;
 	PVOID CertificateInfos;
 	PVOID unk2;
+	PVOID unkData;	// 0 = CspData
+	DWORD Flags;	// 0 = CspData
+	DWORD unkFlags;	// 0x141 (not 0x61)
 	PVOID unk3;
-	DWORD unk4;
-#ifdef _M_X64
-	DWORD		unkAlign0;
-#endif
-	DWORD unk5_size;
-	DWORD sizeOfNextStruct;
-	DWORD sizeOfCurrentStruct;
-	DWORD unk6;
-	PVOID unkCSP; // ?,
-#ifdef _M_IX86
-	DWORD		unkAlign1;
-#endif
-	DWORD unk7;
-	DWORD unk8;
-	KIWI_KERBEROS_CSP_NAMES names;
+	DWORD CspDataLength;
+	KERB_SMARTCARD_CSP_INFO CspData;
 } KIWI_KERBEROS_CSP_INFOS_10, *PKIWI_KERBEROS_CSP_INFOS_10;
 
 typedef struct _KIWI_KERBEROS_LOGON_SESSION_51 {
@@ -454,6 +423,42 @@ typedef struct _KIWI_KERBEROS_INTERNAL_TICKET_6 {
 	ULONG		TicketKvno;
 	KIWI_KERBEROS_BUFFER	Ticket;
 } KIWI_KERBEROS_INTERNAL_TICKET_6, *PKIWI_KERBEROS_INTERNAL_TICKET_6;
+
+typedef struct _KIWI_KERBEROS_INTERNAL_TICKET_10 {
+	LIST_ENTRY	This;
+	PVOID		unk0;
+	PVOID		unk1;
+	PKERB_EXTERNAL_NAME	ServiceName;
+	PKERB_EXTERNAL_NAME	TargetName;
+	LSA_UNICODE_STRING	DomainName;
+	LSA_UNICODE_STRING	TargetDomainName;
+	LSA_UNICODE_STRING	Description;
+	LSA_UNICODE_STRING	AltTargetDomainName;
+	LSA_UNICODE_STRING	KDCServer;	//?
+	DWORD		unk10586_d;
+	PVOID		unk10586_p;
+	PKERB_EXTERNAL_NAME	ClientName;
+	PVOID		name0;
+	ULONG		TicketFlags;
+	ULONG		unk2;
+	ULONG		KeyType;
+	KIWI_KERBEROS_BUFFER	Key;
+	PVOID		unk3;
+	PVOID		unk4;
+	PVOID		unk5;
+	FILETIME	StartTime;
+	FILETIME	EndTime;
+	FILETIME	RenewUntil;
+	ULONG		unk6;
+	ULONG		unk7;
+	PCWSTR		domain;
+	ULONG		unk8;
+	PVOID		strangeNames;
+	ULONG		unk9;
+	ULONG		TicketEncType;
+	ULONG		TicketKvno;
+	KIWI_KERBEROS_BUFFER	Ticket;
+} KIWI_KERBEROS_INTERNAL_TICKET_10, *PKIWI_KERBEROS_INTERNAL_TICKET_10;
 
 typedef struct _KIWI_KERBEROS_KEYS_LIST_5 {
 	DWORD unk0;		// dword_1233EC8 dd 4

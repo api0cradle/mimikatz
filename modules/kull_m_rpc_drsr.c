@@ -1,7 +1,6 @@
-/*	Benjamin DELPY `gentilkiwi`
-	http://blog.gentilkiwi.com
-	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+/*	Benjamin DELPY `gentilkiwi` ( benjamin@gentilkiwi.com / http://blog.gentilkiwi.com )
+	Vincent LE TOUX ( vincent.letoux@gmail.com / http://www.mysmartlogon.com )
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kull_m_rpc_drsr.h"
 
@@ -34,8 +33,11 @@ void RPC_ENTRY kull_m_rpc_drsr_RpcSecurityCallback(void *Context)
 			kull_m_rpc_drsr_g_sKey.SessionKeyLength = 0;
 			kull_m_rpc_drsr_g_sKey.SessionKey = NULL;
 		}
-		secStatus = QueryContextAttributes((PCtxtHandle) data, SECPKG_ATTR_SESSION_KEY, (LPVOID) &kull_m_rpc_drsr_g_sKey);
+		secStatus = QueryContextAttributes(data, SECPKG_ATTR_SESSION_KEY, (LPVOID) &kull_m_rpc_drsr_g_sKey);
+		if(secStatus != SEC_E_OK)
+			PRINT_ERROR(L"QueryContextAttributes %08x\n", secStatus);
 	}
+	else PRINT_ERROR(L"I_RpcBindingInqSecurityContext %08x\n", rpcStatus);
 }
 
 const wchar_t PREFIX_LDAP[] = L"ldap/";
@@ -45,7 +47,7 @@ BOOL kull_m_rpc_drsr_createBinding(LPCWSTR server, RPC_BINDING_HANDLE *hBinding)
 	RPC_STATUS rpcStatus;
 	RPC_WSTR StringBinding = NULL;
 	RPC_SECURITY_QOS SecurityQOS = {RPC_C_SECURITY_QOS_VERSION, RPC_C_QOS_CAPABILITIES_MUTUAL_AUTH, RPC_C_QOS_IDENTITY_STATIC, RPC_C_IMP_LEVEL_DEFAULT};
-	LPWSTR fullServer = NULL;
+	LPWSTR fullServer;
 	DWORD szServer = (DWORD) (wcslen(server) * sizeof(wchar_t)), szPrefix = sizeof(PREFIX_LDAP); // includes NULL;
 
 	*hBinding = NULL;
@@ -61,19 +63,15 @@ BOOL kull_m_rpc_drsr_createBinding(LPCWSTR server, RPC_BINDING_HANDLE *hBinding)
 				{
 					RtlCopyMemory(fullServer, PREFIX_LDAP, szPrefix);
 					RtlCopyMemory((PBYTE) fullServer + (szPrefix - sizeof(wchar_t)), server, szServer);
-
-					rpcStatus = RpcBindingSetAuthInfoEx(*hBinding, (RPC_WSTR) fullServer, RPC_C_AUTHN_LEVEL_PKT_PRIVACY, RPC_C_AUTHN_GSS_NEGOTIATE, NULL, 0, &SecurityQOS);
-					status = (rpcStatus == RPC_S_OK);
-					if(!status)
-						PRINT_ERROR(L"RpcBindingSetAuthInfoEx: 0x%08x (%u)\n", rpcStatus, rpcStatus);
-
-					if(status)
+					rpcStatus = RpcBindingSetAuthInfoEx(*hBinding, (RPC_WSTR) fullServer, RPC_C_AUTHN_LEVEL_PKT_PRIVACY, (MIMIKATZ_NT_BUILD_NUMBER < KULL_M_WIN_BUILD_VISTA) ? RPC_C_AUTHN_GSS_KERBEROS : RPC_C_AUTHN_GSS_NEGOTIATE, NULL, 0, &SecurityQOS);
+					if(rpcStatus == RPC_S_OK)
 					{
 						rpcStatus = RpcBindingSetOption(*hBinding, RPC_C_OPT_SECURITY_CALLBACK, (ULONG_PTR) kull_m_rpc_drsr_RpcSecurityCallback);
 						status = (rpcStatus == RPC_S_OK);
 						if(!status)
 							PRINT_ERROR(L"RpcBindingSetOption: 0x%08x (%u)\n", rpcStatus, rpcStatus);
 					}
+					else PRINT_ERROR(L"RpcBindingSetAuthInfoEx: 0x%08x (%u)\n", rpcStatus, rpcStatus);
 					LocalFree(fullServer);
 				}
 			}
@@ -94,7 +92,7 @@ BOOL kull_m_rpc_drsr_deleteBinding(RPC_BINDING_HANDLE *hBinding)
 	return status;
 }
 
-UUID DRSUAPI_DS_BIND_UUID_Standard = {0xe24d201a, 0x4fd6, 0x11d1, {0xa3, 0xda, 0x00, 0x00, 0xf8, 0x75, 0xae, 0x0d}};
+GUID DRSUAPI_DS_BIND_GUID_Standard	= {0xe24d201a, 0x4fd6, 0x11d1, {0xa3, 0xda, 0x00, 0x00, 0xf8, 0x75, 0xae, 0x0d}};
 BOOL kull_m_rpc_drsr_getDomainAndUserInfos(RPC_BINDING_HANDLE *hBinding, LPCWSTR ServerName, LPCWSTR Domain, GUID *DomainGUID, LPCWSTR User, LPCWSTR Guid, GUID *UserGuid)
 {
 	BOOL DomainGUIDfound = FALSE, ObjectGUIDfound = FALSE;
@@ -112,7 +110,7 @@ BOOL kull_m_rpc_drsr_getDomainAndUserInfos(RPC_BINDING_HANDLE *hBinding, LPCWSTR
 	RpcTryExcept
 	{
 		DrsExtensionsInt.cb = sizeof(DRS_EXTENSIONS_INT) - sizeof(DWORD);
-		drsStatus = IDL_DRSBind(*hBinding, &DRSUAPI_DS_BIND_UUID_Standard, (DRS_EXTENSIONS *) &DrsExtensionsInt, &pDrsExtensionsOutput, &hDrs);
+		drsStatus = IDL_DRSBind(*hBinding, &DRSUAPI_DS_BIND_GUID_Standard, (DRS_EXTENSIONS *) &DrsExtensionsInt, &pDrsExtensionsOutput, &hDrs);
 		if(drsStatus == 0)
 		{
 			dcInfoReq.V1.InfoLevel = 2;
@@ -165,17 +163,30 @@ BOOL kull_m_rpc_drsr_getDCBind(RPC_BINDING_HANDLE *hBinding, GUID *NtdsDsaObject
 {
 	BOOL status = FALSE;
 	ULONG drsStatus;
-	DRS_EXTENSIONS_INT DrsExtensionsInt = {0};
+	DRS_EXTENSIONS_INT DrsExtensionsInt;// = {0};
 	DRS_EXTENSIONS *pDrsExtensionsOutput = NULL;
 
 	DrsExtensionsInt.cb = sizeof(DRS_EXTENSIONS_INT) - sizeof(DWORD);
-	DrsExtensionsInt.dwFlags = 0x04408000; // DRS_EXT_GETCHGREQ_V6 | DRS_EXT_GETCHGREPLY_V6 | DRS_EXT_STRONG_ENCRYPTION
+	DrsExtensionsInt.dwFlags = DRS_EXT_GETCHGREPLY_V6 | DRS_EXT_STRONG_ENCRYPTION;
 
 	RpcTryExcept
 	{
 		drsStatus = IDL_DRSBind(*hBinding, NtdsDsaObjectGuid, (DRS_EXTENSIONS *) &DrsExtensionsInt, &pDrsExtensionsOutput, hDrs); // to free ?
-		if(status = (drsStatus == 0))
-			MIDL_user_free(pDrsExtensionsOutput);
+		if(drsStatus == 0)
+		{
+			if(pDrsExtensionsOutput)
+			{
+				if(((DRS_EXTENSIONS_INT *) pDrsExtensionsOutput)->dwFlags & (DRS_EXT_GETCHGREQ_V8 | DRS_EXT_STRONG_ENCRYPTION))
+					status = TRUE;
+				else PRINT_ERROR(L"Incorrect DRS Extensions Output (%08x)\n", ((DRS_EXTENSIONS_INT *) pDrsExtensionsOutput)->dwFlags);
+				MIDL_user_free(pDrsExtensionsOutput);
+			}
+			else PRINT_ERROR(L"No DRS Extensions Output\n");
+		
+			if(!status)
+				IDL_DRSUnbind(hDrs);
+		}
+		else PRINT_ERROR(L"IDL_DRSBind: %u\n", drsStatus);
 	}
 	RpcExcept(DRS_EXCEPTION)
 		PRINT_ERROR(L"RPC Exception 0x%08x (%u)\n", RpcExceptionCode(), RpcExceptionCode());
@@ -183,6 +194,7 @@ BOOL kull_m_rpc_drsr_getDCBind(RPC_BINDING_HANDLE *hBinding, GUID *NtdsDsaObject
 		return status;
 }
 
+const wchar_t * KULL_M_RPC_DRSR_CrackNames_Error[] = {L"NO_ERROR", L"ERROR_RESOLVING", L"ERROR_NOT_FOUND", L"ERROR_NOT_UNIQUE", L"ERROR_NO_MAPPING", L"ERROR_DOMAIN_ONLY", L"ERROR_NO_SYNTACTICAL_MAPPING", L"ERROR_TRUST_REFERRAL"};
 BOOL kull_m_rpc_drsr_CrackName(DRS_HANDLE hDrs, DS_NAME_FORMAT NameFormat, LPCWSTR Name, DS_NAME_FORMAT FormatWanted, LPWSTR *CrackedName, LPWSTR *CrackedDomain)
 {
 	BOOL status = FALSE;
@@ -210,7 +222,7 @@ BOOL kull_m_rpc_drsr_CrackName(DRS_HANDLE hDrs, DS_NAME_FORMAT NameFormat, LPCWS
 						kull_m_string_copy(CrackedName, nameCrackRep.V1.pResult->rItems[0].pName);
 						kull_m_string_copy(CrackedDomain, nameCrackRep.V1.pResult->rItems[0].pDomain);
 					}
-					else PRINT_ERROR(L"CrackNames (name status): 0x%08x (%u)\n", drsStatus, drsStatus);
+					else PRINT_ERROR(L"CrackNames (name status): 0x%08x (%u) - %s\n", drsStatus, drsStatus, (drsStatus < ARRAYSIZE(KULL_M_RPC_DRSR_CrackNames_Error)) ? KULL_M_RPC_DRSR_CrackNames_Error[drsStatus] : L"?");
 				}
 				else PRINT_ERROR(L"CrackNames: no item!\n");
 			}
@@ -275,7 +287,7 @@ BOOL kull_m_rpc_drsr_ProcessGetNCChangesReply_decrypt(ATTRVAL *val)
 
 	if(kull_m_rpc_drsr_g_sKey.SessionKey && kull_m_rpc_drsr_g_sKey.SessionKeyLength)
 	{
-		if((val->valLen >= FIELD_OFFSET(ENCRYPTED_PAYLOAD, EncryptedData)) && val->pVal)
+		if((val->valLen >= (ULONG) FIELD_OFFSET(ENCRYPTED_PAYLOAD, EncryptedData)) && val->pVal)
 		{
 			encrypted = (PENCRYPTED_PAYLOAD) val->pVal;
 			MD5Init(&md5ctx);
@@ -302,7 +314,7 @@ BOOL kull_m_rpc_drsr_ProcessGetNCChangesReply_decrypt(ATTRVAL *val)
 						MIDL_user_free(toFree);
 					}
 				}
-				else PRINT_ERROR(L"Checksums don\'t match (C:0x%08 - R:0x%08x)\n", calcChecksum == encrypted->CheckSum);
+				else PRINT_ERROR(L"Checksums don\'t match (C:0x%08x - R:0x%08x)\n", calcChecksum, encrypted->CheckSum);
 			}
 			else PRINT_ERROR(L"RtlEncryptDecryptRC4\n");
 		}

